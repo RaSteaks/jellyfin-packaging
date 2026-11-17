@@ -1,0 +1,20 @@
+name: jellyfin-disc-lab
+services:
+  jellyfin:
+    image: ${JELLYFIN_DISC_IMAGE:?Set the exact locally built image tag}
+    container_name: jellyfin-disc-lab
+    ports:
+      - "127.0.0.1:18096:8096"
+    volumes:
+      - disc-lab-config:/config
+      - disc-lab-cache:/cache
+      - type: bind
+        source: ${JELLYFIN_DISC_SAMPLES:?Set an absolute path to disposable samples}
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: "no"
+volumes:
+  disc-lab-config:
+  disc-lab-cache:

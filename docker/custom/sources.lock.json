@@ -1,0 +1,10 @@
+{
+  "version": "13.0.0-dev-disc2",
+  "server": "2953ed632c9277351483eff04f87a8276390691c",
+  "web": "79acd530658ac71270ee8a7017756d0494a11070",
+  "ffmpeg": "64bf9db0fcc51454f129eb6f8d817ad43f476695",
+  "packaging": "12a5fb713de032ee311b5ec9c2639293aa329665",
+  "dotnet_sdk": "10.0.404",
+  "node_image": "node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5",
+  "debian_image": "debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"
+}

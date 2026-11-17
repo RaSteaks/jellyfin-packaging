@@ -4,6 +4,8 @@ ARG NODEJS_VERSION=20
 
 # Combined image version (Debian)
 ARG OS_VERSION=trixie
+ARG DEBIAN_IMAGE=debian:${OS_VERSION}-slim
+ARG NODE_IMAGE=node:${NODEJS_VERSION}-alpine
 
 # Jellyfin FFMPEG package
 ARG FFMPEG_PACKAGE=jellyfin-ffmpeg8
@@ -27,7 +29,7 @@ ARG MALI_PKG_CFG=valhall-g610-g24p0-gbm
 ARG PACKAGE_ARCH
 # Dotnet architeture (x64, arm64, arm), set by build script
 ARG DOTNET_ARCH
-# Base Image architecture (amd64, arm64v8, arm32v7), set by build script
+# Legacy build-script argument; TARGET_ARCH now selects DEBIAN_IMAGE's platform.
 ARG IMAGE_ARCH
 # Target platform architecture (amd64, arm64/v8, arm/v7), set by build script
 ARG TARGET_ARCH
@@ -38,7 +40,7 @@ ARG JELLYFIN_VERSION
 #
 # Build the web artifacts
 #
-FROM node:${NODEJS_VERSION}-alpine AS web
+FROM ${NODE_IMAGE} AS web
 
 ARG SOURCE_DIR=/src
 ARG ARTIFACT_DIR=/web
@@ -72,10 +74,11 @@ RUN npm ci --no-audit --unsafe-perm \
 #
 # Build the server artifacts
 #
-FROM debian:${OS_VERSION}-slim AS server
+FROM ${DEBIAN_IMAGE} AS server
 
 ARG DOTNET_ARCH
 ARG DOTNET_VERSION
+ARG DOTNET_SDK_VERSION
 
 ARG SOURCE_DIR=/src
 ARG ARTIFACT_DIR=/server
@@ -92,7 +95,13 @@ RUN apt-get update \
     curl \
     ca-certificates \
     libicu76 \
- && curl -fsSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel ${DOTNET_VERSION} --install-dir /usr/local/bin
+ && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+ && if [ -n "${DOTNET_SDK_VERSION}" ]; then \
+      bash /tmp/dotnet-install.sh --version "${DOTNET_SDK_VERSION}" --install-dir /usr/local/bin; \
+    else \
+      bash /tmp/dotnet-install.sh --channel "${DOTNET_VERSION}" --install-dir /usr/local/bin; \
+    fi \
+ && rm /tmp/dotnet-install.sh
 
 RUN dotnet publish Jellyfin.Server --arch ${DOTNET_ARCH} --configuration ${CONFIG} \
     --output="${ARTIFACT_DIR}" --self-contained \
@@ -101,7 +110,7 @@ RUN dotnet publish Jellyfin.Server --arch ${DOTNET_ARCH} --configuration ${CONFI
 #
 # Build the final combined image
 #
-FROM --platform=linux/${TARGET_ARCH} ${IMAGE_ARCH}/debian:${OS_VERSION}-slim AS combined
+FROM --platform=linux/${TARGET_ARCH} ${DEBIAN_IMAGE} AS combined
 
 ARG OS_VERSION
 ARG FFMPEG_PACKAGE

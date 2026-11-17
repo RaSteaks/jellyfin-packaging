@@ -26,7 +26,7 @@ the actual sibling repositories, not the packaging submodules, and records both
 HEAD and a content hash. `manifest.json` contains the architecture and generated tag:
 
 ```text
-rasteaks/jellyfin:13.0.0-dev-disc2-<context-sha256-first-12>-<architecture>
+rasteaks/jellyfin:13.0.0-dev-disc3-<context-sha256-first-12>-<architecture>
 ```
 
 Save the entire output, not just the manifest. No commit is manufactured for dirty
@@ -65,7 +65,7 @@ digest/archive for exact redeployment.
 ## Isolated test container
 
 ```sh
-export JELLYFIN_DISC_IMAGE='rasteaks/jellyfin:13.0.0-dev-disc2-<hash>-amd64'
+export JELLYFIN_DISC_IMAGE='rasteaks/jellyfin:13.0.0-dev-disc3-<hash>-amd64'
 export JELLYFIN_DISC_SAMPLES='/absolute/path/to/disposable/samples'
 docker compose -f docker/custom/compose.yaml config
 docker compose -f docker/custom/compose.yaml up -d
@@ -115,3 +115,26 @@ Snapshot safety tests need only Python and Git; Compose configuration validation
 does not need a running Docker daemon. A prepared context or passing configuration
 check is not a successful Docker image build. See the server's `DISC_PLAYBACK.md`
 for implemented behavior and open acceptance gates.
+
+## Adaptive disc playback (opt-in)
+
+Enable **Adaptive quality for disc titles** in Dashboard → Playback → Transcoding.
+The server must permit video and audio transcoding for the test user. Enable the
+existing transcoding throttle and segment deletion options; the local validation
+preset uses 120 seconds ahead and 300 seconds retained. Existing configurations are
+not changed automatically. The pinned FFmpeg package remains disc2: this iteration
+uses its existing encoders/navigation and changes server command generation.
+
+Web Auto can use the multi-quality master; selecting a fixed quality sends an
+explicit opt-out. The server offers compatible H.264/AAC variants and shared audio
+without generating every variant at startup. Native clients control their own HLS
+adaptation and cache; Web's exact timing is not a remote-control protocol.
+
+FFmpeg 8 does not expose the runtime pause command detected by this server. When
+throttling is enabled, adaptive outputs use bounded encoding windows and generate
+the next window on demand. Fixed-quality playback retains the encoder's existing
+throttle behavior. This is temporary streaming data, not a permanent conversion.
+
+See [VidHub testing](VIDHUB_TESTING.md) for the user's macOS acceptance procedure
+and the optional loopback bandwidth proxy. See the server's DISC_PLAYBACK.md for
+source/title identity, codec constraints, and buffering behavior.

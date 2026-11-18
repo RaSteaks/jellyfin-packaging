@@ -3,8 +3,7 @@ set -euo pipefail
 
 arch=${1:?Missing Debian architecture}
 case "$arch" in
-    amd64) rid=linux-x64 ;;
-    arm64) rid=linux-arm64 ;;
+    amd64|arm64) ;;
     *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
@@ -14,7 +13,7 @@ flock -n 9 || { echo "Another component build is in progress." >&2; exit 1; }
 mkdir -p "objects/$arch" sets
 # A NAS reboot can leave a partial checkout or export. Only this private staging
 # directory is disposable; completed objects are reusable after an interruption.
-work=.updater-staging
+work=/components/.updater-staging
 rm -rf -- "$work"
 mkdir "$work"
 trap 'rm -rf -- "$work"' EXIT
@@ -23,14 +22,8 @@ printf '%s\n' "$arch" > "$work/set/architecture"
 
 build_component() {
     local name=$1 repo=$2 commit=$3 recipe_file=$4 output=$5
-    local src="$work/$name/src" recipe="$work/$name/recipe"
-    local proxy_args=() key
-    for key in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; do
-        if [[ -n ${!key:-} ]]; then
-            proxy_args+=(--opt "build-arg:$key=${!key}")
-        fi
-    done
-    mkdir -p "$src" "$recipe"
+    local src="$work/$name"
+    mkdir "$src"
     git init --quiet "$src"
     # Allow large checkouts to finish, but release startup if an HTTPS proxy
     # stops sending data after the branch lookup has already succeeded.
@@ -39,17 +32,18 @@ build_component() {
     git -C "$src" checkout --quiet --detach FETCH_HEAD
     rm -rf -- "$src/.git"
 
-    if [[ $name == ffmpeg ]]; then
-        bash "$recipe_file" "$arch" "$src/Dockerfile.in" > "$recipe/Dockerfile" || return 65
-    else
-        cp "$recipe_file" "$recipe/Dockerfile"
-    fi
-    buildctl build --frontend dockerfile.v0 --progress plain \
-        --local "context=$src" --local "dockerfile=$recipe" \
-        --opt "target=$name" --opt "platform=linux/$arch" \
-        --opt "build-arg:DOTNET_RID=$rid" --opt "build-arg:JELLYFIN_VERSION=$commit" \
-        "${proxy_args[@]}" \
-        --output "type=local,dest=$output" || return 65
+    # Fork-controlled build scripts only need a writable checkout, output and
+    # package cache. The updater keeps ownership of the active selection.
+    install -d -m 0700 -o jellyfin-build -g jellyfin-build /components/.build-home "$output"
+    chown -hR jellyfin-build:jellyfin-build "$src"
+    (
+        cd "$src" || exit 1
+        export HOME=/components/.build-home
+        exec setpriv --reuid=jellyfin-build --regid=jellyfin-build --clear-groups \
+            --no-new-privs bash "$recipe_file" "$output" "$arch" "$commit"
+    ) || return 65
+    chown -hR root:root "$output"
+    chmod -R go-w "$output"
     case "$name" in
         server) test -x "$output/jellyfin" && test -s "$output/jellyfin.runtimeconfig.json" ;;
         web)    test -s "$output/index.html" ;;
@@ -84,7 +78,6 @@ prune_old_generations() {
     done
 }
 
-builder_ready=false
 for name in server web ffmpeg; do
     prefix="JELLYFIN_${name^^}"
     repo_var="${prefix}_REPO"
@@ -98,29 +91,11 @@ for name in server web ffmpeg; do
     fi
     read -r commit ref <<< "$head"
     [[ $commit =~ ^[a-f0-9]{40}$ && $ref == "refs/heads/$branch" ]]
-    recipe_file="/opt/jellyfin-updater/$name.Dockerfile"
-    if [[ $name == ffmpeg ]]; then
-        recipe_file=/opt/jellyfin-updater/ffmpeg-recipe.sh
-    fi
-    checksum=$(sha256sum "$recipe_file")
+    recipe_file="/opt/jellyfin-updater/build-$name.sh"
+    checksum=$(cat "$recipe_file" "/opt/jellyfin-updater/$name.toolchain" | sha256sum)
     recipe_digest=${checksum%% *}
     object="objects/$arch/$name/$commit-$recipe_digest"
     if [[ ! -d $object ]]; then
-        # On NAS boot the service container can be running before its worker is
-        # ready. A restart with no changed commits does not need the worker.
-        if [[ $builder_ready == false ]]; then
-            for ((i = 0; i < 30; i++)); do
-                if timeout 3 buildctl debug workers >/dev/null 2>&1; then
-                    builder_ready=true
-                    break
-                fi
-                sleep 2
-            done
-            if [[ $builder_ready == false ]]; then
-                echo "BuildKit is unavailable; check the builder service log." >&2
-                exit 1
-            fi
-        fi
         echo "Building $name from $branch at $commit" >&2
         mkdir -p "objects/$arch/$name"
         build_component "$name" "$repo" "$commit" "$recipe_file" "$work/$name-output"

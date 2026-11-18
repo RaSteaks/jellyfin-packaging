@@ -1,39 +1,26 @@
-# 群晖按分支更新 Jellyfin
+# 群晖单容器按分支编译 Jellyfin
 
-在群晖 Container Manager 中导入本目录的 `docker-compose.yml`，或把内容粘贴到项目的 YAML 编辑器。镜像、仓库、分支、端口和挂载路径都在这份文件里填写。入口脚本已包含在镜像内。Jellyfin 容器负责查询分支和启动服务，项目里的 rootless BuildKit 容器负责在 NAS 上编译。
+在 Container Manager 项目的 YAML 编辑器中粘贴本目录的 `docker-compose.yml`。填写镜像、三个 fork 的 HTTPS 地址和目标分支、端口及挂载路径。镜像标签为 `synology-native-v2`，支持 Linux AMD64 和 ARM64。项目只运行 `jellyfin` 一个服务。
 
-## 首次部署
+## 部署或迁移
 
-1. 核对旧 Jellyfin 版本到目标 Server 分支的升级路径。停止旧服务，在 File Station 复制整个旧 `/config` 对应的 NAS 文件夹。在 `jellyfin.volumes` 中，找到 `target: /config`，将同一项的 `source` 改为副本的绝对路径，保留原目录用于回退。
-2. 在 `services.jellyfin` 下，将 `image` 改为发布镜像的完整名称和标签，在 `environment` 填写三个 fork 的地址和分支。按需修改 `ports` 映射左侧的 NAS 端口。
-3. 在媒体挂载项填写宿主机路径 `source` 和旧容器内路径 `target`。有多个媒体库时，按模板复制媒体挂载段并逐项填写。若使用硬件转码，从旧项目补上设备映射和组权限。需要出站代理时，填写 `services.builder.environment` 中的代理字段，两个服务会共用这些值。
-4. 在 Container Manager 中创建并启动项目。在 `jellyfin` 服务日志查看每个提交的编译输出。首次构建会下载三个 fork 和依赖。FFmpeg 会编译编解码器、驱动和 Debian 包，占用较多时间和存储。首次成功后 Web 端口才会就绪。
-5. 在浏览器访问群晖地址和你选择的端口，用原账号核对媒体库、观看进度和播放。如果旧实例在过渡期产生了新数据，正式切换前请停两边服务，并用旧实例最新的完整备份做最终迁移。
+1. 核对旧服务器到目标分支的数据库升级路径。停止旧服务，复制整个旧 `/config` 对应的 NAS 文件夹，将副本填入 Compose 的配置挂载。为各媒体库保留原容器内路径。需要硬件转码时，沿用原项目的 GPU 设备映射和权限。
+2. 在 `services.jellyfin.environment` 中填写三个仓库和分支，按需填写出站代理。公开仓库可匿名访问。私有 fork 需要为入口脚本中的 Git 提供只读凭证。FFmpeg 默认以两个并行任务编译，可按 NAS 内存调整 `JELLYFIN_BUILD_JOBS`。
+3. 从 `synology-source-v1` 切换时，停止原项目，保留 `components`、`cache` 卷和配置目录，在同一项目应用新的单服务 Compose 并重新部署。若 DSM 仍列出旧的 builder 容器，单独停止并移除它。原 v1 镜像继续保留。
+4. 在 `jellyfin` 日志查看各组件的 `Building` 或 `Reusing`。首次编译完成后，使用配置的群晖端口访问。切换到原生工具链时三个组件各重编一次。
 
-## 指定仓库和分支
+## 构建和重启
 
-在 `services.jellyfin.environment` 中填写以下六个变量。修改变量后，在 Container Manager 重新部署项目以应用新配置。之后推送源码，只需重启 `jellyfin` 服务。
+| 组件 | 仓库变量 | 分支变量 | 在 NAS 上执行的构建 |
+| --- | --- | --- | --- |
+| Server | `JELLYFIN_SERVER_REPO` | `JELLYFIN_SERVER_BRANCH` | .NET 10 SDK 自包含发布 |
+| Web | `JELLYFIN_WEB_REPO` | `JELLYFIN_WEB_BRANCH` | Node.js 24、npm ci、生产版 Web 构建 |
+| FFmpeg | `JELLYFIN_FFMPEG_REPO` | `JELLYFIN_FFMPEG_BRANCH` | 应用 fork 的 Debian quilt 补丁，原生编译 FFmpeg、FFprobe 和 jellyfin-disc-info |
 
-| 组件 | 仓库变量 | 分支变量 |
-| --- | --- | --- |
-| Server | `JELLYFIN_SERVER_REPO` | `JELLYFIN_SERVER_BRANCH` |
-| Web | `JELLYFIN_WEB_REPO` | `JELLYFIN_WEB_BRANCH` |
-| FFmpeg | `JELLYFIN_FFMPEG_REPO` | `JELLYFIN_FFMPEG_BRANCH` |
+FFmpeg 配方适配提供 `debian/rules`、quilt 补丁及光盘导航工具的 Jellyfin FFmpeg 8 fork。使用镜像内的 Debian 开发库及配套的 FDK、AMF 或 Rockchip 开发文件。ARM64 在本机编译。可用硬件编码器仍取决于 NAS 的芯片、内核驱动和容器映射。
 
-构建配方适配 .NET 10 Server、Node 24 Web 和带 Debian `Dockerfile.in` 及 `jellyfin-disc-info` 的 FFmpeg 8 源码。公开仓库可匿名读取。私有 fork 需要给容器中的 Git 单独配置只读凭证。
+向选定分支推送后重启 Jellyfin。更新器按架构、源码提交和该组件的构建配方及工具链摘要复用产物。NAS 只在本地缺少对应产物时获取源码并编译；更新同一镜像的 Web 分支时可复用 Server 与 FFmpeg。构建在容器内以专用非 root 用户执行，与运行中的服务共用文件系统。只配置可信的 fork 和分支。下载依赖需要 NAS 能访问相应仓库、NuGet 和 npm。编译期间 Web 服务尚未启动。
 
-## 重启和恢复
+## 恢复
 
-每次重启会检查三个分支的提交，以及镜像里各组件的构建配方摘要。日志中的 `Building` 表示准备新产物，`Reusing` 表示复用相同架构、提交和配方的产物。三项都就绪后才切换版本。第一次从旧缓存格式升级时，三个组件各重编一次，成功切换前可继续回退到原版本。
-
-首次编译或产物检查失败时，容器保留日志并等待人工重试，Web 服务尚未启动。修正原因后，在 Container Manager 重启 `jellyfin` 即可再次尝试。已经完成的组件会留到下次重试。若已有完整版本，拉取或构建失败时会启动上次选定的版本。HTTPS 源码下载持续 120 秒低于 1 KiB/s 时会中止该次拉取。
-
-组件和 BuildKit 缓存分别存放在 `components`、`builder-cache` 卷。`/components/current/commits` 逐行记录组件名、源码提交和配方 SHA-256。每次成功检查后，更新器保留当前和上一组已启用的版本，清理两者都未引用的组件。失败的更新不会触发清理。上一组版本的目录名记录在 `/components/current/previous`。Server 如果已经迁移数据库，回退时还需要与旧版本匹配的配置备份。
-
-## 构建环境
-
-发布镜像覆盖 `linux/amd64` 和 `linux/arm64`。默认构建器要求 DSM 内核支持非特权用户命名空间。若 `builder` 日志报告 `unshare: operation not permitted` 或 `newuidmap` 失败，请先确认该机型的内核支持。ARM64 的 FFmpeg 沿用 fork 的 amd64 交叉编译环境，还要求构建器能够执行 amd64 构建步骤。编译时可以在 `builder` 日志里定位平台或内核错误。
-
-如果 DSM 内核不支持 rootless，而你接受专用构建容器拥有 NAS 级特权，可以在同一份 Compose 里仅修改 `builder` 服务。把镜像换成 `moby/buildkit:v0.33.1`，删除 `security_opt`，加入 `privileged: true`，保留同一个 `--addr` 和 `builder-run` 套接字卷。将该服务的缓存挂载改为 `builder-cache-rootful:/var/lib/buildkit`，并在顶层 `volumes` 增加 `builder-cache-rootful:`。这样可以使用新的缓存目录及其对应的用户权限。此模式会扩大构建器的权限，默认配置使用 rootless。
-
-只有配置的 fork 会提供源码。BuildKit 能执行这些源码中的构建命令，因此应选择你信任的仓库和分支。构建器只挂载自己的运行目录和缓存。详见 [BuildKit rootless 配置](https://github.com/moby/buildkit/blob/master/docs/rootless.md) 和 [多架构编译说明](https://github.com/moby/buildkit/blob/master/docs/multi-platform.md)。
+三个组件均就绪后才切换整组版本。`/components/current/commits` 记录各组件的提交与配方摘要。成功检查后保留当前和上一组组件，构建用户的包缓存保存在 `components` 卷中。已有完整版本时，网络或编译失败会继续启用上次选定的版本。首次编译失败时保留日志并等待人工重试，修正原因后重启容器。若服务器已经迁移数据库，回退服务器镜像时还需要匹配的配置备份。

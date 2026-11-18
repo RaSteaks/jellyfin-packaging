@@ -1,0 +1,65 @@
+services:
+  builder:
+    image: moby/buildkit:v0.33.1-rootless@sha256:f8a833b2de9d68e27f0815e4a737abdfaf8a2e4c615650557df11025101557b4
+    # 两个服务共用这组代理设置，按需填写。
+    environment: &proxy
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: "localhost,127.0.0.1,::1"
+    restart: unless-stopped
+    # Native snapshots work without /dev/fuse. Only the private Unix socket is shared.
+    command: ["--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "--oci-worker-snapshotter=native"]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+    volumes:
+      - builder-run:/run/user/1000
+      - builder-cache:/home/user/.local/share/buildkit
+    healthcheck:
+      test: ["CMD", "buildctl", "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "debug", "workers"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  jellyfin:
+    image: "your-dockerhub-account/jellyfin:your-tag"
+    restart: unless-stopped
+    depends_on:
+      builder:
+        condition: service_started
+    ports:
+      - "8096:8096/tcp" # 左侧为群晖端口，可按需修改。
+    environment:
+      <<: *proxy
+      # 填写三个 fork 的 HTTPS 地址和各自的分支名。
+      JELLYFIN_SERVER_REPO: ""
+      JELLYFIN_SERVER_BRANCH: ""
+      JELLYFIN_WEB_REPO: ""
+      JELLYFIN_WEB_BRANCH: ""
+      JELLYFIN_FFMPEG_REPO: ""
+      JELLYFIN_FFMPEG_BRANCH: ""
+    volumes:
+      - builder-run:/run/user/1000:ro
+      - components:/components
+      - cache:/cache
+      # Use the full config backup from the stopped instance on first deployment.
+      - type: bind
+        source: "/path/to/jellyfin-config-copy"
+        target: /config
+        bind:
+          create_host_path: false
+      # Repeat this bind for each additional library, keeping its old container path.
+      - type: bind
+        source: "/path/to/media"
+        target: "/media"
+        read_only: true
+        bind:
+          create_host_path: false
+
+volumes:
+  builder-run:
+  builder-cache:
+  components:
+  cache:

@@ -1,0 +1,6 @@
+*
+!entrypoint.sh
+!update-components.sh
+!server.Dockerfile
+!web.Dockerfile
+!ffmpeg-recipe.sh

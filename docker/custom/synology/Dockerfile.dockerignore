@@ -5,3 +5,4 @@
 !build-web.sh
 !build-ffmpeg.sh
 !install-codec-sdk.sh
+!0001-libav-utils-fix-non-multiplane-fmt-bit_shift-in-pl_m.patch

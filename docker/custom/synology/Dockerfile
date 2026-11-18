@@ -7,6 +7,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY install-codec-sdk.sh /tmp/
 RUN bash /tmp/install-codec-sdk.sh
 
+# Match the FFmpeg fork's libplacebo API and P01x bit-shift patch. Keep the
+# headers, pkg-config file and shared library together in the FFmpeg SDK.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git liblcms2-dev libshaderc-dev libvulkan-dev python3-jinja2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY 0001-libav-utils-fix-non-multiplane-fmt-bit_shift-in-pl_m.patch /tmp/
+RUN git clone --depth 1 --branch v7.360.1 https://github.com/haasn/libplacebo.git /tmp/libplacebo \
+ && cd /tmp/libplacebo \
+ && test "$(git rev-parse HEAD)" = cee9b076f2c63104ccfd497fa79c39a867293ec4 \
+ && git submodule update --init --depth 1 -- 3rdparty \
+ && git apply /tmp/0001-libav-utils-fix-non-multiplane-fmt-bit_shift-in-pl_m.patch \
+ && sed -i 's/env: python_env,//g' src/vulkan/meson.build \
+ && meson setup build --prefix=/opt/jellyfin-codecs --libdir=lib \
+        --buildtype=release --default-library=shared \
+        -Dvulkan=enabled -Dvk-proc-addr=enabled -Dvulkan-registry=/usr/share/vulkan/registry/vk.xml \
+        -Dshaderc=enabled -Dglslang=disabled -Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false \
+ && ninja -C build -j4 install
+
 FROM jellyfin/jellyfin:2026111613@sha256:e9351b7367beb388a789f2dee02108cd1e86f8114654bf12bdfb9f5e4b03f81c
 RUN set -eu; \
     intel_packages=""; \
@@ -31,6 +49,11 @@ RUN set -eu; \
     ln -s /components/current/web /jellyfin/jellyfin-web; \
     useradd --system --user-group --home-dir /components/.build-home \
         --no-create-home --shell /usr/sbin/nologin jellyfin-build
+
+# Preserve the large toolchain layer already on v2 installations. Replace
+# its distro headers and provide lcms2.pc, required by the patched SDK.
+RUN apt-get update && apt-get install -y --no-install-recommends liblcms2-dev \
+ && dpkg --remove libplacebo-dev && rm -rf /var/lib/apt/lists/*
 
 COPY --link --from=dotnet /usr/share/dotnet/ /usr/share/dotnet/
 COPY --link --from=node /usr/local/bin/node /usr/local/bin/node

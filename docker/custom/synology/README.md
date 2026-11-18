@@ -17,7 +17,7 @@
 | Web | `JELLYFIN_WEB_REPO` | `JELLYFIN_WEB_BRANCH` | Node.js 24、npm ci、生产版 Web 构建 |
 | FFmpeg | `JELLYFIN_FFMPEG_REPO` | `JELLYFIN_FFMPEG_BRANCH` | 应用 fork 的 Debian quilt 补丁，原生编译 FFmpeg、FFprobe 和 jellyfin-disc-info |
 
-FFmpeg 配方适配提供 `debian/rules`、quilt 补丁及光盘导航工具的 Jellyfin FFmpeg 8 fork。使用镜像内的 Debian 开发库及配套的 FDK、AMF 或 Rockchip 开发文件。ARM64 在本机编译。可用硬件编码器仍取决于 NAS 的芯片、内核驱动和容器映射。
+FFmpeg 配方适配提供 `debian/rules`、quilt 补丁及光盘导航工具的 Jellyfin FFmpeg 8 fork。镜像在 `/opt/jellyfin-codecs` 中提供 libplacebo v7.360.1 的头文件和共享库，并应用 fork 的 P01x 位移补丁。更新这项依赖只改变 FFmpeg 的缓存键。ARM64 在本机编译。可用硬件编码器仍取决于 NAS 的芯片、内核驱动和容器映射。
 
 向选定分支推送后重启 Jellyfin。更新器按架构、源码提交和该组件的构建配方及工具链摘要复用产物。NAS 只在本地缺少对应产物时获取源码并编译；更新同一镜像的 Web 分支时可复用 Server 与 FFmpeg。构建在容器内以专用非 root 用户执行，与运行中的服务共用文件系统。只配置可信的 fork 和分支。下载依赖需要 NAS 能访问相应仓库、NuGet 和 npm。编译期间 Web 服务尚未启动。
 
